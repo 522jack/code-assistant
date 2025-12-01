@@ -2,7 +2,7 @@ package com.codeassistant.rag
 
 import com.codeassistant.llm.OllamaClient
 import kotlinx.coroutines.coroutineScope
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
 import java.util.UUID
 import kotlin.math.sqrt
 

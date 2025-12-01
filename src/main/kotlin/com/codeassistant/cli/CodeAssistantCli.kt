@@ -11,7 +11,7 @@ import com.codeassistant.project.ProjectInfo
 import com.codeassistant.rag.RagService
 import com.codeassistant.rag.TextChunker
 import kotlinx.coroutines.runBlocking
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jline.reader.LineReaderBuilder
 import org.jline.terminal.TerminalBuilder
 import java.io.File

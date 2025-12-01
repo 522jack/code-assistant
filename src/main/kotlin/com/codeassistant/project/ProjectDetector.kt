@@ -1,6 +1,6 @@
 package com.codeassistant.project
 
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
 import java.io.File
 import java.security.MessageDigest
 

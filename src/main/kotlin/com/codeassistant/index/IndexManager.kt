@@ -4,7 +4,7 @@ import com.codeassistant.config.AppConfig
 import com.codeassistant.project.ProjectInfo
 import com.codeassistant.rag.RagIndex
 import kotlinx.serialization.json.Json
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
 import java.io.File
 
 private val logger = KotlinLogging.logger {}
