@@ -18,3 +18,4 @@ out/
 
 # Code Assistant cache
 .code-assistant/
+/local.properties
