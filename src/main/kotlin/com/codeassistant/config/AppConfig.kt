@@ -11,7 +11,8 @@ data class AppConfig(
     val ollamaUrl: String = "http://localhost:11434",
     val embeddingModel: String = "nomic-embed-text",
     val claudeModel: String = "claude-sonnet-4-5-20250929",
-    val cacheDir: File = defaultCacheDir()
+    val cacheDir: File = defaultCacheDir(),
+    val githubToken: String? = null  // GitHub token for API access
 ) {
     companion object {
         fun defaultCacheDir(): File {
@@ -27,10 +28,12 @@ data class AppConfig(
                 ?: throw IllegalStateException("CLAUDE_API_KEY environment variable is required")
 
             val ollamaUrl = System.getenv("OLLAMA_URL") ?: "http://localhost:11434"
+            val githubToken = System.getenv("GITHUB_TOKEN")
 
             return AppConfig(
                 claudeApiKey = apiKey,
-                ollamaUrl = ollamaUrl
+                ollamaUrl = ollamaUrl,
+                githubToken = githubToken
             )
         }
     }
