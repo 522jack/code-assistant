@@ -67,6 +67,20 @@ fun main(args: Array<String>) {
         val claudeClient = ClaudeClient(httpClient, config.claudeApiKey)
         val gitTool = GitTool(workingDir)
 
+        // Initialize task management components
+        val taskManager = com.codeassistant.task.TaskManager(config)
+        val taskService = com.codeassistant.task.TaskService(ragService, claudeClient, gitTool)
+        val taskTool = com.codeassistant.task.TaskTool(taskService)
+
+        // Load existing tasks if available
+        val projectInfo = projectDetector.detectProject().getOrNull()
+        if (projectInfo != null && taskManager.hasTasks(projectInfo)) {
+            val taskIndex = taskManager.loadTasks(projectInfo)
+            if (taskIndex != null) {
+                taskService.loadIndex(taskIndex)
+            }
+        }
+
         // Create and start CLI
         val cli = CodeAssistantCli(
             config = config,
@@ -74,10 +88,20 @@ fun main(args: Array<String>) {
             indexManager = indexManager,
             ragService = ragService,
             claudeClient = claudeClient,
-            gitTool = gitTool
+            gitTool = gitTool,
+            taskTool = taskTool
         )
 
         cli.start()
+
+        // Save tasks before exiting
+        if (projectInfo != null) {
+            val taskIndex = taskService.getIndex()
+            if (taskIndex != null) {
+                val updatedIndex = taskIndex.copy(projectHash = projectInfo.projectHash)
+                taskManager.saveTasks(projectInfo, updatedIndex)
+            }
+        }
 
         // Cleanup
         httpClient.close()

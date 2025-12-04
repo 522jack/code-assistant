@@ -53,6 +53,22 @@ data class AppConfig(
     fun getProjectIndexFile(projectHash: String): File {
         return File(getProjectIndexDir(projectHash), "rag_index.json")
     }
+
+    /**
+     * Get tasks directory for a specific project
+     */
+    fun getProjectTasksDir(projectHash: String): File {
+        return File(cacheDir, "tasks/$projectHash").apply {
+            mkdirs()
+        }
+    }
+
+    /**
+     * Get tasks file for a specific project
+     */
+    fun getProjectTasksFile(projectHash: String): File {
+        return File(getProjectTasksDir(projectHash), "tasks.json")
+    }
 }
 
 /**

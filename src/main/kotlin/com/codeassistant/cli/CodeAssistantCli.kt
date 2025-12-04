@@ -27,7 +27,8 @@ class CodeAssistantCli(
     private val indexManager: IndexManager,
     private val ragService: RagService,
     private val claudeClient: ClaudeClient,
-    private val gitTool: GitTool
+    private val gitTool: GitTool,
+    private val taskTool: com.codeassistant.task.TaskTool
 ) {
     private var projectInfo: ProjectInfo? = null
     private val conversationHistory = mutableListOf<ClaudeMessage>()
@@ -59,12 +60,20 @@ Keep your answers concise and practical."""
 
         println()
         println("Commands:")
-        println("  /help [question]  - Ask a question about the project")
-        println("  /branch           - Show current git branch")
-        println("  /reindex          - Reindex project documentation")
-        println("  /info             - Show project information")
-        println("  /clear            - Clear conversation history")
-        println("  /exit, /quit      - Exit the assistant")
+        println("  /help [question]         - Ask a question about the project")
+        println("  /branch                  - Show current git branch")
+        println("  /reindex                 - Reindex project documentation")
+        println("  /info                    - Show project information")
+        println("  /clear                   - Clear conversation history")
+        println()
+        println("Task Management:")
+        println("  /task create [title]     - Create a new task")
+        println("  /tasks [filter]          - List tasks (all, high, medium, low, todo, done)")
+        println("  /task [id]               - Show task details")
+        println("  /task done [id]          - Mark task as done")
+        println("  /recommend               - Get AI task recommendations")
+        println()
+        println("  /exit, /quit             - Exit the assistant")
         println()
 
         // Start REPL
@@ -104,6 +113,25 @@ Keep your answers concise and practical."""
                     line.startsWith("/clear") -> {
                         conversationHistory.clear()
                         println("✓ Conversation history cleared")
+                    }
+                    line.startsWith("/task create") -> {
+                        val title = line.removePrefix("/task create").trim()
+                        runBlocking { handleTaskCreateCommand(title) }
+                    }
+                    line.startsWith("/tasks") -> {
+                        val filter = line.removePrefix("/tasks").trim()
+                        handleTasksListCommand(filter)
+                    }
+                    line.startsWith("/task done") -> {
+                        val id = line.removePrefix("/task done").trim()
+                        handleTaskDoneCommand(id)
+                    }
+                    line.startsWith("/task") -> {
+                        val id = line.removePrefix("/task").trim()
+                        handleTaskViewCommand(id)
+                    }
+                    line.startsWith("/recommend") -> {
+                        runBlocking { handleRecommendCommand() }
                     }
                     else -> {
                         println("Unknown command. Type /help to see available commands.")
@@ -353,5 +381,305 @@ Please answer the question based on the documentation provided above."""
         }
 
         println()
+    }
+
+    /**
+     * Handle /task create command
+     */
+    private suspend fun handleTaskCreateCommand(title: String) {
+        println()
+
+        if (title.isEmpty()) {
+            println("Usage: /task create [title]")
+            println("Example: /task create Implement user authentication")
+            return
+        }
+
+        try {
+            println("📝 Creating new task...")
+            println()
+
+            // Get description
+            print("Description (optional, press Enter to skip): ")
+            val description = readlnOrNull()?.trim() ?: ""
+
+            // Get priority
+            print("Priority? (1=high, 2=medium, 3=low) [2]: ")
+            val priorityInput = readlnOrNull()?.trim() ?: "2"
+            val priority = com.codeassistant.task.TaskPriority.fromNumber(priorityInput.toIntOrNull() ?: 2)
+                ?: com.codeassistant.task.TaskPriority.MEDIUM
+
+            // Get tags
+            print("Tags (comma-separated, optional): ")
+            val tagsInput = readlnOrNull()?.trim() ?: ""
+            val tags = if (tagsInput.isNotEmpty()) {
+                tagsInput.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            } else {
+                emptyList()
+            }
+
+            // Create task
+            val result = taskTool.createTask(title, description, priority, tags)
+
+            if (result.isSuccess) {
+                val task = result.getOrThrow()
+                println()
+                println("✓ Task created successfully!")
+                println("  ID: ${task.id}")
+                println("  Title: ${task.title}")
+                println("  Priority: ${task.priority}")
+                println("  Status: ${task.status}")
+            } else {
+                println("❌ Error: ${result.exceptionOrNull()?.message}")
+            }
+
+        } catch (e: Exception) {
+            logger.error(e) { "Error creating task" }
+            println("❌ Error: ${e.message}")
+        }
+
+        println()
+    }
+
+    /**
+     * Handle /tasks list command
+     */
+    private fun handleTasksListCommand(filter: String) {
+        println()
+
+        try {
+            val priority = when (filter.lowercase()) {
+                "high" -> com.codeassistant.task.TaskPriority.HIGH
+                "medium" -> com.codeassistant.task.TaskPriority.MEDIUM
+                "low" -> com.codeassistant.task.TaskPriority.LOW
+                else -> null
+            }
+
+            val status = when (filter.lowercase()) {
+                "todo" -> com.codeassistant.task.TaskStatus.TODO
+                "done" -> com.codeassistant.task.TaskStatus.DONE
+                "in_progress", "inprogress" -> com.codeassistant.task.TaskStatus.IN_PROGRESS
+                "blocked" -> com.codeassistant.task.TaskStatus.BLOCKED
+                else -> null
+            }
+
+            val result = taskTool.listTasks(priority = priority, status = status)
+
+            if (result.isFailure) {
+                println("❌ Error: ${result.exceptionOrNull()?.message}")
+                return
+            }
+
+            val tasks = result.getOrThrow()
+
+            if (tasks.isEmpty()) {
+                println("📋 No tasks found")
+                if (filter.isNotEmpty()) {
+                    println("  Filter: $filter")
+                }
+                println()
+                return
+            }
+
+            // Group by priority
+            val filterText = if (filter.isNotEmpty()) " ($filter)" else ""
+            println("📋 Tasks$filterText (${tasks.size} total)")
+            println()
+
+            val byPriority = tasks.groupBy { it.priority }
+
+            listOf(
+                com.codeassistant.task.TaskPriority.HIGH,
+                com.codeassistant.task.TaskPriority.MEDIUM,
+                com.codeassistant.task.TaskPriority.LOW
+            ).forEach { pri ->
+                val priTasks = byPriority[pri] ?: emptyList()
+                if (priTasks.isNotEmpty()) {
+                    println("${pri.name} PRIORITY (${priTasks.size})")
+                    priTasks.forEach { task ->
+                        val statusIcon = when (task.status) {
+                            com.codeassistant.task.TaskStatus.TODO -> "○"
+                            com.codeassistant.task.TaskStatus.IN_PROGRESS -> "◐"
+                            com.codeassistant.task.TaskStatus.DONE -> "●"
+                            com.codeassistant.task.TaskStatus.BLOCKED -> "✗"
+                        }
+                        println("  $statusIcon [${task.id}] ${task.title}")
+                        println("     Status: ${task.status} | Created: ${formatDate(task.createdAt)}")
+                        if (task.tags.isNotEmpty()) {
+                            println("     Tags: ${task.tags.joinToString(", ")}")
+                        }
+                    }
+                    println()
+                }
+            }
+
+            println("Use /task [id] to view details")
+
+        } catch (e: Exception) {
+            logger.error(e) { "Error listing tasks" }
+            println("❌ Error: ${e.message}")
+        }
+
+        println()
+    }
+
+    /**
+     * Handle /task view command
+     */
+    private fun handleTaskViewCommand(id: String) {
+        println()
+
+        if (id.isEmpty()) {
+            println("Usage: /task [id]")
+            println("Example: /task a7b3c4d5")
+            return
+        }
+
+        try {
+            val result = taskTool.getTask(id)
+
+            if (result.isFailure) {
+                println("❌ Error: ${result.exceptionOrNull()?.message}")
+                println()
+                return
+            }
+
+            val task = result.getOrThrow()
+
+            println("📌 Task Details")
+            println()
+            println("Title: ${task.title}")
+            println("ID: ${task.id}")
+            println("Priority: ${task.priority}")
+            println("Status: ${task.status}")
+            println("Created: ${formatDate(task.createdAt)}")
+            println("Updated: ${formatDate(task.updatedAt)}")
+
+            if (task.completedAt != null) {
+                println("Completed: ${formatDate(task.completedAt)}")
+            }
+
+            if (task.description.isNotEmpty()) {
+                println()
+                println("Description:")
+                println(task.description)
+            }
+
+            if (task.tags.isNotEmpty()) {
+                println()
+                println("Tags: ${task.tags.joinToString(", ")}")
+            }
+
+            if (task.relatedFiles.isNotEmpty()) {
+                println()
+                println("Related Files:")
+                task.relatedFiles.forEach { file ->
+                    println("  - $file")
+                }
+            }
+
+            println()
+            println("Commands:")
+            println("  /task done ${task.id}    - Mark as done")
+
+        } catch (e: Exception) {
+            logger.error(e) { "Error viewing task" }
+            println("❌ Error: ${e.message}")
+        }
+
+        println()
+    }
+
+    /**
+     * Handle /task done command
+     */
+    private fun handleTaskDoneCommand(id: String) {
+        println()
+
+        if (id.isEmpty()) {
+            println("Usage: /task done [id]")
+            println("Example: /task done a7b3c4d5")
+            return
+        }
+
+        try {
+            val result = taskTool.updateTaskStatus(id, com.codeassistant.task.TaskStatus.DONE)
+
+            if (result.isSuccess) {
+                val task = result.getOrThrow()
+                println("✓ Task marked as DONE!")
+                println("  Title: ${task.title}")
+                println("  Completed: ${formatDate(task.completedAt!!)}")
+            } else {
+                println("❌ Error: ${result.exceptionOrNull()?.message}")
+            }
+
+        } catch (e: Exception) {
+            logger.error(e) { "Error marking task as done" }
+            println("❌ Error: ${e.message}")
+        }
+
+        println()
+    }
+
+    /**
+     * Handle /recommend command
+     */
+    private suspend fun handleRecommendCommand() {
+        println()
+        println("🤖 Analyzing tasks...")
+
+        try {
+            val result = taskTool.getRecommendations(topK = 3)
+
+            if (result.isFailure) {
+                println("❌ Error: ${result.exceptionOrNull()?.message}")
+                return
+            }
+
+            val recommendations = result.getOrThrow()
+
+            if (recommendations.isEmpty()) {
+                println("📋 No tasks to recommend")
+                println("  Create tasks with /task create")
+                println()
+                return
+            }
+
+            println()
+            println("💡 Recommended Tasks (Top ${recommendations.size})")
+            println()
+
+            recommendations.forEachIndexed { index, rec ->
+                println("${index + 1}. [${rec.task.id}] ${rec.task.title} (${rec.task.priority})")
+                println("   Score: ${String.format("%.1f", rec.score)}/10")
+                println()
+                println("   Reasoning: ${rec.reasoning}")
+                println()
+
+                if (rec.relevantContext.isNotEmpty()) {
+                    println("   Context:")
+                    rec.relevantContext.take(2).forEach { ctx ->
+                        println("   - $ctx")
+                    }
+                    println()
+                }
+            }
+
+            println("Use /task [id] to view full details")
+
+        } catch (e: Exception) {
+            logger.error(e) { "Error generating recommendations" }
+            println("❌ Error: ${e.message}")
+        }
+
+        println()
+    }
+
+    /**
+     * Format timestamp to readable date
+     */
+    private fun formatDate(timestamp: Long): String {
+        return java.text.SimpleDateFormat("yyyy-MM-dd").format(java.util.Date(timestamp))
     }
 }
