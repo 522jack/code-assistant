@@ -1,11 +1,13 @@
 package com.codeassistant
 
+import com.codeassistant.cicd.CiCdService
 import com.codeassistant.cli.CodeAssistantCli
 import com.codeassistant.config.AppConfig
 import com.codeassistant.git.GitTool
 import com.codeassistant.index.IndexManager
 import com.codeassistant.llm.ClaudeClient
 import com.codeassistant.llm.OllamaClient
+import com.codeassistant.notifications.NotificationService
 import com.codeassistant.project.ProjectDetector
 import com.codeassistant.rag.RagService
 import com.codeassistant.rag.TextChunker
@@ -67,6 +69,21 @@ fun main(args: Array<String>) {
         val claudeClient = ClaudeClient(httpClient, config.claudeApiKey)
         val gitTool = GitTool(workingDir)
 
+        // Initialize notification service
+        val notificationService = NotificationService(
+            httpClient = httpClient,
+            botToken = config.telegramBotToken,
+            defaultChatId = config.telegramChatId
+        )
+
+        // Initialize CI/CD service
+        val cicdService = CiCdService(
+            httpClient = httpClient,
+            githubToken = config.githubToken,
+            gitTool = gitTool,
+            notificationService = notificationService
+        )
+
         // Initialize task management components
         val taskManager = com.codeassistant.task.TaskManager(config)
         val taskService = com.codeassistant.task.TaskService(ragService, claudeClient, gitTool)
@@ -89,7 +106,9 @@ fun main(args: Array<String>) {
             ragService = ragService,
             claudeClient = claudeClient,
             gitTool = gitTool,
-            taskTool = taskTool
+            taskTool = taskTool,
+            cicdService = cicdService,
+            notificationService = notificationService
         )
 
         cli.start()

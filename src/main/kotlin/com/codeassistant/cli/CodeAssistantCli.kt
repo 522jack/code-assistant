@@ -1,11 +1,13 @@
 package com.codeassistant.cli
 
+import com.codeassistant.cicd.CiCdService
 import com.codeassistant.config.AppConfig
 import com.codeassistant.git.GitTool
 import com.codeassistant.index.IndexManager
 import com.codeassistant.llm.ClaudeClient
 import com.codeassistant.llm.ClaudeMessage
 import com.codeassistant.llm.OllamaClient
+import com.codeassistant.notifications.NotificationService
 import com.codeassistant.project.ProjectDetector
 import com.codeassistant.project.ProjectInfo
 import com.codeassistant.rag.RagService
@@ -28,7 +30,9 @@ class CodeAssistantCli(
     private val ragService: RagService,
     private val claudeClient: ClaudeClient,
     private val gitTool: GitTool,
-    private val taskTool: com.codeassistant.task.TaskTool
+    private val taskTool: com.codeassistant.task.TaskTool,
+    private val cicdService: CiCdService,
+    private val notificationService: NotificationService
 ) {
     private var projectInfo: ProjectInfo? = null
     private val conversationHistory = mutableListOf<ClaudeMessage>()
@@ -72,6 +76,11 @@ Keep your answers concise and practical."""
         println("  /task [id]               - Show task details")
         println("  /task done [id]          - Mark task as done")
         println("  /recommend               - Get AI task recommendations")
+        println()
+        println("CI/CD & Notifications:")
+        println("  /build [owner/repo] [workflow] [branch]  - Trigger GitHub Actions workflow")
+        println("  /status [owner/repo] [run-id]            - Check build status")
+        println("  /notify [message]                        - Send Telegram notification")
         println()
         println("  /exit, /quit             - Exit the assistant")
         println()
@@ -132,6 +141,18 @@ Keep your answers concise and practical."""
                     }
                     line.startsWith("/recommend") -> {
                         runBlocking { handleRecommendCommand() }
+                    }
+                    line.startsWith("/build") -> {
+                        val args = line.removePrefix("/build").trim().split("\\s+".toRegex())
+                        runBlocking { handleBuildCommand(args) }
+                    }
+                    line.startsWith("/status") -> {
+                        val args = line.removePrefix("/status").trim().split("\\s+".toRegex())
+                        runBlocking { handleStatusCommand(args) }
+                    }
+                    line.startsWith("/notify") -> {
+                        val message = line.removePrefix("/notify").trim()
+                        runBlocking { handleNotifyCommand(message) }
                     }
                     else -> {
                         println("Unknown command. Type /help to see available commands.")
@@ -681,5 +702,205 @@ Please answer the question based on the documentation provided above."""
      */
     private fun formatDate(timestamp: Long): String {
         return java.text.SimpleDateFormat("yyyy-MM-dd").format(java.util.Date(timestamp))
+    }
+
+    /**
+     * Handle build command
+     */
+    private suspend fun handleBuildCommand(args: List<String>) {
+        try {
+            if (!cicdService.isConfigured()) {
+                println("❌ CI/CD not configured. Please set GITHUB_TOKEN environment variable.")
+                return
+            }
+
+            // Parse arguments
+            if (args.isEmpty() || args[0].isEmpty()) {
+                println("Usage: /build [owner/repo] [workflow] [branch]")
+                println("Example: /build anthropics/claude-code build.yml main")
+                return
+            }
+
+            val repoPath = args[0].split("/")
+            if (repoPath.size != 2) {
+                println("❌ Invalid repository format. Use: owner/repo")
+                return
+            }
+
+            val owner = repoPath[0]
+            val repo = repoPath[1]
+            val workflow = if (args.size > 1) args[1] else "build.yml"
+            val branch = if (args.size > 2) args[2] else null
+
+            println("🚀 Triggering build for $owner/$repo...")
+            println("   Workflow: $workflow")
+            if (branch != null) {
+                println("   Branch: $branch")
+            }
+            println()
+
+            val result = cicdService.triggerBuild(
+                owner = owner,
+                repo = repo,
+                workflowId = workflow,
+                ref = branch,
+                waitForCompletion = false,
+                sendNotification = notificationService.isTelegramConfigured()
+            )
+
+            if (result.isFailure) {
+                println("❌ Error: ${result.exceptionOrNull()?.message}")
+                return
+            }
+
+            val triggerResult = result.getOrThrow()
+
+            if (triggerResult.success) {
+                println("✅ ${triggerResult.message}")
+                if (triggerResult.workflowRunId != null) {
+                    println()
+                    println("Use /status $owner/$repo ${triggerResult.workflowRunId} to check status")
+                }
+            } else {
+                println("❌ ${triggerResult.message}")
+            }
+
+        } catch (e: Exception) {
+            logger.error(e) { "Error triggering build" }
+            println("❌ Error: ${e.message}")
+        }
+
+        println()
+    }
+
+    /**
+     * Handle status command
+     */
+    private suspend fun handleStatusCommand(args: List<String>) {
+        try {
+            if (!cicdService.isConfigured()) {
+                println("❌ CI/CD not configured. Please set GITHUB_TOKEN environment variable.")
+                return
+            }
+
+            // Parse arguments
+            if (args.size < 2 || args[0].isEmpty() || args[1].isEmpty()) {
+                println("Usage: /status [owner/repo] [run-id]")
+                println("Example: /status anthropics/claude-code 123456789")
+                return
+            }
+
+            val repoPath = args[0].split("/")
+            if (repoPath.size != 2) {
+                println("❌ Invalid repository format. Use: owner/repo")
+                return
+            }
+
+            val owner = repoPath[0]
+            val repo = repoPath[1]
+            val runId = args[1].toLongOrNull()
+
+            if (runId == null) {
+                println("❌ Invalid run ID. Must be a number.")
+                return
+            }
+
+            println("🔍 Checking build status for $owner/$repo run #$runId...")
+            println()
+
+            val result = cicdService.checkBuildStatus(
+                owner = owner,
+                repo = repo,
+                runId = runId,
+                sendNotification = false
+            )
+
+            if (result.isFailure) {
+                println("❌ Error: ${result.exceptionOrNull()?.message}")
+                return
+            }
+
+            val status = result.getOrThrow()
+
+            println("📊 Build Status")
+            println("   Status: ${status.status}")
+            if (status.conclusion != null) {
+                val emoji = when (status.conclusion) {
+                    "success" -> "✅"
+                    "failure" -> "❌"
+                    "cancelled" -> "🚫"
+                    else -> "⚠️"
+                }
+                println("   Conclusion: $emoji ${status.conclusion}")
+            }
+            println("   URL: ${status.htmlUrl}")
+
+            if (status.duration != null) {
+                val minutes = status.duration / 60
+                val seconds = status.duration % 60
+                println("   Duration: ${minutes}m ${seconds}s")
+            }
+
+            if (status.artifacts.isNotEmpty()) {
+                println()
+                println("📦 Artifacts (${status.artifacts.size})")
+                status.artifacts.take(5).forEach { artifact ->
+                    val sizeMB = artifact.sizeInBytes / (1024.0 * 1024.0)
+                    println("   - ${artifact.name} (${String.format("%.2f", sizeMB)} MB)")
+                }
+            }
+
+            if (status.failedSteps.isNotEmpty()) {
+                println()
+                println("❌ Failed Steps:")
+                status.failedSteps.forEach { step ->
+                    println("   - $step")
+                }
+            }
+
+        } catch (e: Exception) {
+            logger.error(e) { "Error checking status" }
+            println("❌ Error: ${e.message}")
+        }
+
+        println()
+    }
+
+    /**
+     * Handle notify command
+     */
+    private suspend fun handleNotifyCommand(message: String) {
+        try {
+            if (!notificationService.isTelegramConfigured()) {
+                println("❌ Telegram not configured. Please set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.")
+                println()
+                println("Environment variables needed:")
+                println("  export TELEGRAM_BOT_TOKEN=8290382294:AAFZoFAtwtJ39mY_z3Irr7ACi57pBrVx6vk")
+                println("  export TELEGRAM_CHAT_ID=-1001234567890")
+                return
+            }
+
+            if (message.isEmpty()) {
+                println("Usage: /notify [message]")
+                println("Example: /notify Build completed successfully!")
+                return
+            }
+
+            println("📤 Sending notification to Telegram...")
+
+            val result = notificationService.sendMessage(message)
+
+            if (result.isSuccess) {
+                println("✅ Notification sent successfully!")
+            } else {
+                println("❌ Error: ${result.exceptionOrNull()?.message}")
+            }
+
+        } catch (e: Exception) {
+            logger.error(e) { "Error sending notification" }
+            println("❌ Error: ${e.message}")
+        }
+
+        println()
     }
 }

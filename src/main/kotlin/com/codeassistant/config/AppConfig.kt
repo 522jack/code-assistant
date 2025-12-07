@@ -12,7 +12,9 @@ data class AppConfig(
     val embeddingModel: String = "nomic-embed-text",
     val claudeModel: String = "claude-sonnet-4-5-20250929",
     val cacheDir: File = defaultCacheDir(),
-    val githubToken: String? = null  // GitHub token for API access
+    val githubToken: String? = null,  // GitHub token for API access
+    val telegramBotToken: String? = null,  // Telegram bot token for notifications
+    val telegramChatId: String? = null  // Default Telegram chat ID for notifications
 ) {
     companion object {
         fun defaultCacheDir(): File {
@@ -29,11 +31,15 @@ data class AppConfig(
 
             val ollamaUrl = System.getenv("OLLAMA_URL") ?: "http://localhost:11434"
             val githubToken = System.getenv("GITHUB_TOKEN")
+            val telegramBotToken = System.getenv("TELEGRAM_BOT_TOKEN")
+            val telegramChatId = System.getenv("TELEGRAM_CHAT_ID")
 
             return AppConfig(
                 claudeApiKey = apiKey,
                 ollamaUrl = ollamaUrl,
-                githubToken = githubToken
+                githubToken = githubToken,
+                telegramBotToken = telegramBotToken,
+                telegramChatId = telegramChatId
             )
         }
     }
