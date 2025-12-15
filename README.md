@@ -185,7 +185,7 @@ src/main/kotlin/com/codeassistant/
 ./gradlew build
 
 # Fat JAR со всеми зависимостями
-./gradlew shadowJar
+
 
 # Запуск
 java -jar build/libs/code-assistant-0.1.0.jar

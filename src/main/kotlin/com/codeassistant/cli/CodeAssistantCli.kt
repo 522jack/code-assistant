@@ -875,8 +875,8 @@ Please answer the question based on the documentation provided above."""
                 println("❌ Telegram not configured. Please set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.")
                 println()
                 println("Environment variables needed:")
-                println("  export TELEGRAM_BOT_TOKEN=8290382294:AAFZoFAtwtJ39mY_z3Irr7ACi57pBrVx6vk")
-                println("  export TELEGRAM_CHAT_ID=-1001234567890")
+                println("  export TELEGRAM_BOT_TOKEN='your-bot-token'")
+                println("  export TELEGRAM_CHAT_ID='your-chat-id'")
                 return
             }
 
